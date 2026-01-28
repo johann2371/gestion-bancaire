@@ -1,0 +1,117 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "brandon/compteBancaire"
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
+        DOCKER_CREDENTIALS = 'dockerhub-credentials'
+        BACKEND_DIR = 'backend'
+    }
+
+    tools {
+        maven 'Maven3'
+        jdk 'JDK17'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo 'Récupération du code source...'
+                git branch: 'main', url: 'https://github.com/Ryoukhi/gestion-bancaire.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo 'Compilation du projet...'
+                dir(BACKEND_DIR) {
+                    bat 'mvn clean package -DskipTests'
+                }
+            }
+        }
+
+        stage('Tests unitaires') {
+            steps {
+                echo 'Exécution des tests...'
+                dir(BACKEND_DIR) {
+                    bat 'mvn test'
+                }
+            }
+            post {
+                always {
+                    junit "${BACKEND_DIR}/**/target/surefire-reports/*.xml"
+                }
+            }
+        }
+
+        stage('Analyse SonarQube') {
+            steps {
+                echo 'Analyse de la qualité du code...'
+                dir(BACKEND_DIR) {
+                    withSonarQubeEnv('SonarQube') {
+                        bat 'mvn sonar:sonar -Dsonar.projectKey=gestion-bancaire'
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                echo 'Vérification du Quality Gate...'
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo 'Construction de l\'image Docker...'
+                dir(BACKEND_DIR) {
+                    script {
+                        bat "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                        bat "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
+                    }
+                }
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                echo 'Push de l\'image vers Docker Hub...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: DOCKER_CREDENTIALS,
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS')]) {
+                        bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
+                        bat "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                        bat "docker push ${DOCKER_IMAGE}:latest"
+                    }
+                }
+            }
+        }
+
+        stage('Clean up') {
+            steps {
+                echo 'Nettoyage des images locales...'
+                script {
+                    bat "docker rmi ${DOCKER_IMAGE}:${DOCKER_TAG} || exit 0"
+                    bat "docker rmi ${DOCKER_IMAGE}:latest || exit 0"
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline exécuté avec succès !'
+        }
+        failure {
+            echo 'Le pipeline a échoué.'
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

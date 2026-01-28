@@ -1,0 +1,27 @@
+# Laravel
+/vendor/
+/node_modules/
+.env
+.env
+.env.local
+.env.production
+.env.testing
+
+/storage/*.key
+/public/storage
+
+# Logs
+*.log
+
+# Cache / compiled files
+/bootstrap/cache/
+/storage/framework/
+/storage/logs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
